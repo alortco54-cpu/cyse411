@@ -17,27 +17,26 @@ const orders = [
   { id: 4, userId: 2, item: "Keyboard", region: "south", total: 60 },
 ];
 
-// Very simple "authentication" via headers:
+// Simple fake "authentication" via headers:
 //   X-User-Id: <user id>
-//   (we pretend that real auth already happened)
+// (Pretend real auth already happened)
 function fakeAuth(req, res, next) {
   const idHeader = req.header("X-User-Id");
   const id = idHeader ? parseInt(idHeader, 10) : null;
 
   const user = users.find((u) => u.id === id);
   if (!user) {
-    return res.status(401).json({ error: "Unauthenticated: set X-User-Id" });
+    return res.status(401).json({ error: "Unauthenticated: set X-User-Id header" });
   }
 
-  // Attach authenticated user to the request
-  req.user = user;
+  req.user = user; // Attach authenticated user
   next();
 }
 
-// Apply fakeAuth to all routes below this line
+// Apply authentication to all routes
 app.use(fakeAuth);
 
-// VULNERABLE endpoint: no ownership check (IDOR)
+// SECURE: FIXED ENDPOINT WITH PROPER ACCESS CONTROL
 app.get("/orders/:id", (req, res) => {
   const orderId = parseInt(req.params.id, 10);
 
@@ -46,15 +45,28 @@ app.get("/orders/:id", (req, res) => {
     return res.status(404).json({ error: "Order not found" });
   }
 
-  // BUG: no check that order.userId === req.user.id
+  const user = req.user;
+
+  // Customers must ONLY access their own orders
+  if (user.role === "customer" && order.userId !== user.id) {
+    return res.status(403).json({ error: "Access denied: you do not own this order" });
+  }
+
+  // Support users can view orders ONLY in their own region
+  if (user.role === "support" && order.region !== user.department) {
+    return res.status(403).json({ error: "Access denied: region mismatch" });
+  }
+
+  // OK: return order safely
   return res.json(order);
 });
 
-
-
 // Health check
 app.get("/", (req, res) => {
-  res.json({ message: "Access Control Tutorial API", currentUser: req.user });
+  res.json({
+    message: "Access Control Tutorial API",
+    currentUser: req.user,
+  });
 });
 
 // Start server
